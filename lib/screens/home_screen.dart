@@ -21,6 +21,8 @@ class _HomeScreenState extends State<HomeScreen> {
   int _totalResiduos = 0;
   int _racha = 0;
   bool _mostrarNiveles = false;
+  int _semanaActual = 0;
+  int _semanaAnterior = 0;
 
   @override
   void initState() {
@@ -32,14 +34,26 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _cargarDatos() async {
     final historial = await _firestoreService.obtenerHistorialCompleto();
     final racha = _firestoreService.calcularRacha(historial);
+    final impactoSemanal = await _firestoreService.calcularImpactoSemanal(historial);
     setState(() {
       _totalResiduos = historial.length;
       _racha = racha;
+      _semanaActual = impactoSemanal['actual'] ?? 0;
+      _semanaAnterior = impactoSemanal['anterior'] ?? 0;
     });
   }
 
   Future<void> _cargarSugerencia() async {
     try {
+      final sugerenciaCacheada = await _firestoreService.obtenerSugerenciaSiReciente();
+      if (sugerenciaCacheada != null) {
+        setState(() {
+          _sugerencia = sugerenciaCacheada;
+          _cargandoSugerencia = false;
+        });
+        return;
+      }
+
       final historial = await _firestoreService.obtenerHistorialReciente(limite: 5);
 
       if (historial.isEmpty) {
@@ -50,8 +64,14 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      final tipos = historial.map((r) => r.tipo).toList();
+      final tipos = historial
+          .map((r) => r.material)
+          .where((m) => m.isNotEmpty)
+          .toList();
+
       final sugerencia = await _geminiService.generarSugerencia(tipos);
+
+      await _firestoreService.guardarSugerencia(sugerencia);
 
       setState(() {
         _sugerencia = sugerencia;
@@ -90,6 +110,34 @@ class _HomeScreenState extends State<HomeScreen> {
     if (hora >= 5 && hora < 12) return '¡Buenos días, Eco Warrior! 🌞';
     if (hora >= 12 && hora < 19) return '¡Buenas tardes, Eco Warrior! 🌤️';
     return '¡Buenas noches, Eco Warrior! 🌙';
+  }
+
+  Map<String, dynamic> _tendenciaSemanal() {
+    if (_semanaAnterior == 0 && _semanaActual == 0) {
+      return {
+        'emoji': '🌱',
+        'mensaje': 'Empieza tu primera semana reciclando',
+        'color': Colors.grey,
+      };
+    }
+    if (_semanaActual > _semanaAnterior) {
+      return {
+        'emoji': '📈',
+        'mensaje': '¡Vas mejorando esta semana!',
+        'color': Colors.green,
+      };
+    } else if (_semanaActual < _semanaAnterior) {
+      return {
+        'emoji': '📉',
+        'mensaje': 'Esta semana reciclaste menos, ¡tú puedes más!',
+        'color': Colors.orange,
+      };
+    }
+    return {
+      'emoji': '➡️',
+      'mensaje': 'Mantienes el mismo ritmo que la semana pasada',
+      'color': Colors.blue,
+    };
   }
 
   @override
@@ -328,6 +376,101 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 ],
+              ),
+
+              const SizedBox(height: 16),
+
+              // Impacto de la semana
+              Builder(
+                builder: (context) {
+                  final tendencia = _tendenciaSemanal();
+                  return Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.green.shade200),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Text(tendencia['emoji'], style: const TextStyle(fontSize: 18)),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Tu impacto de la semana',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.black54,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '$_semanaActual',
+                                    style: TextStyle(
+                                      fontSize: 26,
+                                      fontWeight: FontWeight.bold,
+                                      color: tendencia['color'],
+                                    ),
+                                  ),
+                                  const Text(
+                                    'esta semana',
+                                    style: TextStyle(fontSize: 11, color: Colors.black54),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              width: 1,
+                              height: 36,
+                              color: Colors.grey.shade200,
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '$_semanaAnterior',
+                                    style: const TextStyle(
+                                      fontSize: 26,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black45,
+                                    ),
+                                  ),
+                                  const Text(
+                                    'semana pasada',
+                                    style: TextStyle(fontSize: 11, color: Colors.black54),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          tendencia['mensaje'],
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: tendencia['color'],
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
 
               const SizedBox(height: 16),

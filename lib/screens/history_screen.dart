@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/firestore_service.dart';
 import '../models/residuo.dart';
+import '../data/tachos_data.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -25,42 +26,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
       _historialFuture = _firestoreService.obtenerHistorialCompleto();
     });
     await _historialFuture;
-  }
-
-  Color _colorPorTipo(String tipo) {
-    final tipoLower = tipo.toLowerCase();
-    if (tipoLower.contains('plástico') || tipoLower.contains('plastico')) {
-      return Colors.amber.shade700;
-    } else if (tipoLower.contains('papel') || tipoLower.contains('cartón') || tipoLower.contains('carton')) {
-      return Colors.blue.shade700;
-    } else if (tipoLower.contains('vidrio')) {
-      return Colors.green.shade700;
-    } else if (tipoLower.contains('orgánico') || tipoLower.contains('organico')) {
-      return Colors.brown.shade400;
-    } else if (tipoLower.contains('metal')) {
-      return Colors.blueGrey.shade600;
-    } else if (tipoLower.contains('no reciclable')) {
-      return Colors.grey.shade800;
-    }
-    return Colors.grey.shade700;
-  }
-
-  IconData _iconoPorTipo(String tipo) {
-    final tipoLower = tipo.toLowerCase();
-    if (tipoLower.contains('plástico') || tipoLower.contains('plastico')) {
-      return Icons.local_drink;
-    } else if (tipoLower.contains('papel') || tipoLower.contains('cartón') || tipoLower.contains('carton')) {
-      return Icons.description;
-    } else if (tipoLower.contains('vidrio')) {
-      return Icons.wine_bar;
-    } else if (tipoLower.contains('orgánico') || tipoLower.contains('organico')) {
-      return Icons.eco;
-    } else if (tipoLower.contains('metal')) {
-      return Icons.settings;
-    } else if (tipoLower.contains('no reciclable')) {
-      return Icons.delete_forever;
-    }
-    return Icons.delete_outline;
   }
 
   @override
@@ -127,8 +92,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               itemCount: historial.length,
               itemBuilder: (context, index) {
                 final residuo = historial[index];
-                final color = _colorPorTipo(residuo.tipo);
-                final icono = _iconoPorTipo(residuo.tipo);
+                final tachoInfo = obtenerTachoInfo(residuo.tacho);
 
                 return Container(
                   margin: const EdgeInsets.only(bottom: 12),
@@ -143,10 +107,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: color.withOpacity(0.15),
+                          color: tachoInfo.color.withOpacity(0.15),
                           shape: BoxShape.circle,
                         ),
-                        child: Icon(icono, color: color, size: 24),
+                        child: Icon(tachoInfo.icono, color: tachoInfo.color, size: 24),
                       ),
                       const SizedBox(width: 14),
                       Expanded(
@@ -154,7 +118,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              residuo.tipo,
+                              residuo.material,
                               style: const TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 15,
@@ -162,9 +126,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
                             ),
                             const SizedBox(height: 2),
                             Text(
+                              'Tacho ${tachoInfo.categoria}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: tachoInfo.color,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
                               DateFormat('dd/MM/yyyy - HH:mm').format(residuo.fecha),
                               style: const TextStyle(
-                                fontSize: 12,
+                                fontSize: 11,
                                 color: Colors.black54,
                               ),
                             ),

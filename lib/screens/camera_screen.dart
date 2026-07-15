@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import '../services/gemini_service.dart';
 import '../services/firestore_service.dart';
 import '../models/residuo.dart';
+import '../data/tachos_data.dart';
 import 'result_screen.dart';
 
 class CameraScreen extends StatefulWidget {
@@ -34,6 +35,56 @@ class _CameraScreenState extends State<CameraScreen> {
     });
   }
 
+  void _mostrarModalAnalizando() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return PopScope(
+          canPop: false,
+          child: Dialog(
+            backgroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: CircularProgressIndicator(
+                      color: Colors.green,
+                      strokeWidth: 3,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    '🍃 Tu agente EcoLens está analizando la foto',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Esto puede tomar unos segundos...',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.black54,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _analizarResiduo() async {
     if (_imagenSeleccionada == null) return;
 
@@ -41,56 +92,178 @@ class _CameraScreenState extends State<CameraScreen> {
       _analizando = true;
     });
 
+    _mostrarModalAnalizando();
+
     try {
       final bytes = await _imagenSeleccionada!.readAsBytes();
       final resultado = await _geminiService.clasificarResiduo(bytes);
 
-      final residuo = Residuo(
-        tipo: resultado['tipo'] ?? 'Desconocido',
-        contenedor: resultado['contenedor'] ?? 'Desconocido',
-        mensajeImpacto: resultado['mensajeImpacto'] ?? '',
-        fecha: DateTime.now(),
-        puntos: 10,
-      );
-
-      await _firestoreService.guardarResiduo(residuo);
-
       if (!mounted) return;
+      Navigator.pop(context); // cierra el modal de carga
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Row(
-            children: [
-              Icon(Icons.check_circle, color: Colors.white),
-              SizedBox(width: 10),
-              Text('Guardado correctamente'),
-            ],
-          ),
-          backgroundColor: Colors.green,
-          duration: Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      final confianza = resultado['confianza'] ?? 'ALTA';
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ResultScreen(
-            residuo: residuo,
-            imagen: _imagenSeleccionada!,
-          ),
-        ),
-      );
-    } catch (e) {
-      setState(() {
-        _analizando = false;
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al analizar: $e')),
-        );
+      if (confianza == 'BAJA') {
+        final confirmado = await _mostrarModoConfianza(resultado);
+        if (confirmado != true) {
+          setState(() => _analizando = false);
+          return; // el usuario canceló, no se guarda nada
+        }
       }
+
+      await _guardarYNavegar(resultado);
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context);
+      setState(() => _analizando = false);
+      _mostrarErrorDialog();
     }
+  }
+
+  Future<bool?> _mostrarModoConfianza(Map<String, String> resultado) async {
+    final tachoInfo = obtenerTachoInfo(resultado['tacho'] ?? 'NEGRO');
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.help_outline, color: Colors.orange),
+            SizedBox(width: 10),
+            Expanded(child: Text('¿Es esto correcto?')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'No estoy del todo seguro con esta imagen. Creo que es:',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: tachoInfo.color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Icon(tachoInfo.icono, color: tachoInfo.color),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '${resultado['material']} → Tacho ${tachoInfo.categoria}',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: tachoInfo.color,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('No, tomar otra foto'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Sí, confirmar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _guardarYNavegar(Map<String, String> resultado) async {
+    final tacho = resultado['tacho'] ?? 'NEGRO';
+    final tachoInfo = obtenerTachoInfo(tacho);
+
+    final residuo = Residuo(
+      material: resultado['material'] ?? 'Desconocido',
+      tacho: tacho,
+      categoriaTacho: tachoInfo.categoria,
+      mensajeImpacto: tachoInfo.mensajeImpacto,
+      fecha: DateTime.now(),
+      puntos: 10,
+      confianza: resultado['confianza'] ?? 'ALTA',
+    );
+
+    await _firestoreService.guardarResiduo(residuo);
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.white),
+            SizedBox(width: 10),
+            Text('Guardado correctamente'),
+          ],
+        ),
+        backgroundColor: Colors.green,
+        duration: Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ResultScreen(
+          residuo: residuo,
+          imagen: _imagenSeleccionada!,
+        ),
+      ),
+    );
+  }
+
+  void _mostrarErrorDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.info_outline, color: Colors.orange),
+            SizedBox(width: 10),
+            Text('No pudimos analizar la foto'),
+          ],
+        ),
+        content: const Text(
+          'El agente de IA está muy solicitado en este momento. '
+          'Por favor, intenta nuevamente en unos segundos.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Entendido'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _analizarResiduo();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Reintentar'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override

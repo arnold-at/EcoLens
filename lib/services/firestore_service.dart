@@ -90,6 +90,54 @@ class FirestoreService {
     return racha;
   }
 
+  /// Guarda la sugerencia generada junto con la fecha (para no gastar cuota de IA innecesariamente)
+  Future<void> guardarSugerencia(String sugerencia) async {
+    await _userDoc.set({
+      'ultimaSugerencia': sugerencia,
+      'fechaSugerencia': DateTime.now(),
+    }, SetOptions(merge: true));
+  }
+
+  /// Obtiene la última sugerencia guardada, si sigue siendo "reciente"
+  Future<String?> obtenerSugerenciaSiReciente({int minutosValidez = 60}) async {
+    final doc = await _userDoc.get();
+    if (!doc.exists) return null;
+    final data = doc.data() as Map<String, dynamic>?;
+    final ultimaSugerencia = data?['ultimaSugerencia'] as String?;
+    final fechaSugerencia = (data?['fechaSugerencia'] as Timestamp?)?.toDate();
+
+    if (ultimaSugerencia == null || fechaSugerencia == null) return null;
+
+    final minutosTranscurridos = DateTime.now().difference(fechaSugerencia).inMinutes;
+    if (minutosTranscurridos > minutosValidez) return null;
+
+    return ultimaSugerencia;
+  }
+
+  /// Calcula cuántos residuos se clasificaron en la semana actual vs la anterior
+  Future<Map<String, int>> calcularImpactoSemanal(List<Residuo> historialCompleto) async {
+    final ahora = DateTime.now();
+    final inicioSemanaActual = ahora.subtract(const Duration(days: 7));
+    final inicioSemanaAnterior = ahora.subtract(const Duration(days: 14));
+
+    int semanaActual = 0;
+    int semanaAnterior = 0;
+
+    for (final residuo in historialCompleto) {
+      if (residuo.fecha.isAfter(inicioSemanaActual)) {
+        semanaActual++;
+      } else if (residuo.fecha.isAfter(inicioSemanaAnterior) &&
+          residuo.fecha.isBefore(inicioSemanaActual)) {
+        semanaAnterior++;
+      }
+    }
+
+    return {
+      'actual': semanaActual,
+      'anterior': semanaAnterior,
+    };
+  }
+
   /// Stream en tiempo real de los puntos (útil para actualizar el Home automáticamente)
   Stream<int> streamPuntos() {
     return _userDoc.snapshots().map((doc) {
